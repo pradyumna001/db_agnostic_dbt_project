@@ -1,0 +1,16 @@
+version: 2
+
+models:
+  - name: as_of_dates
+    columns:
+      - name: as_of_date
+        data_tests: [unique, not_null]
+  - name: pit_customer
+    description: Customer point-in-time table (daily) over sat_customer_details and sat_customer_pii.
+    columns:
+      - name: pit_hk
+        data_tests: [unique, not_null]
+  - name: brg_order_line
+    columns:
+      - name: order_line_hk
+        data_tests: [unique, not_null]

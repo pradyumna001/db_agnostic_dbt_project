@@ -1,0 +1,57 @@
+version: 2
+
+models:
+  - name: dim_date
+    columns:
+      - name: date_key
+        data_tests: [unique, not_null]
+  - name: dim_customer
+    description: SCD2 customer dimension. Contains PII; consumers should use dim_customer_secure.
+    data_tests:
+      - unique_combination: {arguments: {columns: [customer_hk, effective_from]}}
+    columns:
+      - name: customer_sk
+        data_tests: [unique, not_null]
+      - name: first_name
+        meta: {pii: true, pii_class: name}
+      - name: last_name
+        meta: {pii: true, pii_class: name}
+      - name: email
+        meta: {pii: true, pii_class: email}
+      - name: phone
+        meta: {pii: true, pii_class: phone}
+      - name: date_of_birth
+        meta: {pii: true, pii_class: date}
+      - name: address_line1
+        meta: {pii: true, pii_class: address}
+      - name: postal_code
+        meta: {pii: true, pii_class: postal_code}
+  - name: dim_product
+    columns:
+      - name: product_hk
+        data_tests: [unique, not_null]
+  - name: fct_order_line
+    columns:
+      - name: order_line_hk
+        data_tests: [unique, not_null]
+      - name: customer_sk
+        data_tests:
+          - relationships: {arguments: {to: ref('dim_customer'), field: customer_sk}}
+      - name: product_hk
+        data_tests:
+          - relationships: {arguments: {to: ref('dim_product'), field: product_hk}}
+      - name: order_date_key
+        data_tests:
+          - relationships: {arguments: {to: ref('dim_date'), field: date_key}}
+  - name: fct_order
+    columns:
+      - name: order_hk
+        data_tests: [unique, not_null]
+  - name: agg_daily_sales
+    data_tests:
+      - unique_combination: {arguments: {columns: [order_date_key, channel]}}
+  - name: dim_customer_secure
+    description: PII-masked customer dimension for general consumers.
+    columns:
+      - name: customer_sk
+        data_tests: [unique, not_null]

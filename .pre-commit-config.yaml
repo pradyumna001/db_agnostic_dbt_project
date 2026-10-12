@@ -1,0 +1,43 @@
+# Run `make setup` inside db_agnostic_performant_dbt/ to install these hooks.
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+        args: [--unsafe]
+      - id: check-json
+      - id: check-merge-conflict
+      - id: check-added-large-files
+        args: [--maxkb=1024]
+      - id: detect-private-key
+      - id: mixed-line-ending
+        args: [--fix=lf]
+
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.21.2
+    hooks:
+      - id: gitleaks
+
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.7.4
+    hooks:
+      - id: ruff
+        args: [--fix]
+      - id: ruff-format
+
+  - repo: https://github.com/antonbabenko/pre-commit-terraform
+    rev: v1.96.2
+    hooks:
+      - id: terraform_fmt
+
+  # Needs a reachable Postgres (dbt templater compiles models): `make up`, then
+  # `pre-commit run sqlfluff-lint --hook-stage manual --all-files`. CI runs it in the postgres job.
+  - repo: https://github.com/sqlfluff/sqlfluff
+    rev: 3.2.5
+    hooks:
+      - id: sqlfluff-lint
+        stages: [manual]
+        additional_dependencies: ["dbt-postgres~=1.11.0", "sqlfluff-templater-dbt==3.2.5"]
+        files: ^db_agnostic_performant_dbt/models/

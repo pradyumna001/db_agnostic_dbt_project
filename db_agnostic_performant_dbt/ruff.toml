@@ -1,0 +1,7 @@
+line-length = 120
+target-version = "py311"
+
+[lint]
+select = ["E", "F", "I", "B", "UP", "S"]
+# E501: formatter owns line length; S311: non-crypto RNG for fake data; S608: SQL built from trusted identifiers
+ignore = ["E501", "S101", "S311", "S608", "UP031"]

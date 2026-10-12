@@ -1,0 +1,182 @@
+name: dbt CI
+
+on:
+  pull_request:
+    paths:
+      - "db_agnostic_performant_dbt/**"
+      - ".github/workflows/dbt-ci.yml"
+      - ".pre-commit-config.yaml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: dbt-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    working-directory: db_agnostic_performant_dbt
+
+env:
+  DBT_PROFILES_DIR: profiles
+  DBT_ENV: ci
+  DBT_PII_SALT: ci-only-salt
+  PYTHON_VERSION: "3.11"
+
+jobs:
+  lint:
+    name: pre-commit
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: .
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_wrapper: false
+      - uses: pre-commit/action@v3.0.1
+
+  parse:
+    name: parse (${{ matrix.target }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [postgres, sqlserver, oracle, snowflake, databricks]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v3
+      - name: Install dbt
+        run: uv venv && uv pip install -r requirements.txt
+      - name: dbt parse
+        env:
+          SNOWFLAKE_ACCOUNT: ci-placeholder
+          SNOWFLAKE_USER: ci-placeholder
+        run: .venv/bin/dbt parse --target ${{ matrix.target }}
+
+  integration:
+    name: build (${{ matrix.target }})
+    needs: parse
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [postgres, sqlserver, oracle]
+    env:
+      DBT_SCHEMA: dbt_ci
+      DBT_RAW_SCHEMA: raw
+      PG_HOST: localhost
+      PG_USER: dbt
+      PG_PASSWORD: dbt_local_pw
+      PG_DATABASE: analytics
+      MSSQL_HOST: localhost
+      MSSQL_USER: sa
+      MSSQL_PASSWORD: Dbt_local_pw1
+      MSSQL_DATABASE: analytics
+      MSSQL_TRUST_CERT: "true"
+      ORACLE_HOST: localhost
+      ORACLE_SERVICE: FREEPDB1
+      ORACLE_USER: dbt
+      ORACLE_PASSWORD: dbt_local_pw
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v3
+      - name: Start ${{ matrix.target }}
+        run: docker compose -f infra/docker/docker-compose.yml up -d --wait ${{ matrix.target }}
+      - name: Install ODBC Driver 18
+        if: matrix.target == 'sqlserver'
+        run: |
+          if ! (command -v odbcinst >/dev/null && odbcinst -q -d | grep -q "ODBC Driver 18"); then
+            curl -fsSL https://packages.microsoft.com/keys/microsoft.asc | sudo gpg --batch --yes --dearmor -o /usr/share/keyrings/microsoft-prod.gpg
+            curl -fsSL "https://packages.microsoft.com/config/ubuntu/$(lsb_release -rs)/prod.list" | sudo tee /etc/apt/sources.list.d/mssql-release.list
+            sudo apt-get update && sudo ACCEPT_EULA=Y apt-get install -y msodbcsql18 unixodbc-dev
+          fi
+      - name: Install Python deps
+        run: uv venv && uv pip install -r requirements.txt -r requirements-dev.txt
+      - name: Create database (sqlserver)
+        if: matrix.target == 'sqlserver'
+        run: make mssql-db
+      - name: Generate synthetic data
+        run: .venv/bin/python data_generator/generate.py --out data --customers 300 --products 50 --orders 800 --batches 3
+      - name: Batch 1 - initial load + full build
+        run: |
+          .venv/bin/python data_generator/load.py --target ${{ matrix.target }} --data data --batch 1
+          .venv/bin/dbt build --target ${{ matrix.target }}
+      - name: Batches 2-3 - incremental builds
+        run: |
+          for b in 2 3; do
+            .venv/bin/python data_generator/load.py --target ${{ matrix.target }} --data data --batch "$b"
+            .venv/bin/dbt build --target ${{ matrix.target }}
+          done
+      - name: Idempotency - rerun with no new data must not change the vault
+        run: |
+          .venv/bin/python scripts/row_counts.py --target ${{ matrix.target }} > before.json
+          .venv/bin/dbt build --target ${{ matrix.target }}
+          .venv/bin/python scripts/row_counts.py --target ${{ matrix.target }} > after.json
+          diff before.json after.json
+      - name: Lint SQL (sqlfluff, dbt templater)
+        if: matrix.target == 'postgres'
+        run: .venv/bin/sqlfluff lint models tests/golden
+      - name: Benchmark summary
+        if: always()
+        run: .venv/bin/python scripts/benchmark.py --run-results target/run_results.json --label ${{ matrix.target }} >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: dbt-artifacts-${{ matrix.target }}
+          path: |
+            db_agnostic_performant_dbt/target/run_results.json
+            db_agnostic_performant_dbt/target/manifest.json
+            db_agnostic_performant_dbt/logs/dbt.log
+          retention-days: 14
+
+  slim-ci-cloud:
+    name: slim CI (${{ matrix.target }})
+    needs: parse
+    # Enabled once cloud infrastructure exists (repo variable ENABLE_CLOUD_CI=true).
+    if: vars.ENABLE_CLOUD_CI == 'true' && github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    environment: ci
+    permissions:
+      contents: read
+      id-token: write
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [snowflake, databricks]
+    env:
+      DBT_SCHEMA: ci_pr_${{ github.event.number }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v3
+      - run: uv venv && uv pip install -r requirements.txt
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_CI_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+      - name: Load warehouse credentials from Secrets Manager
+        run: scripts/load_secrets.sh "${{ vars.SECRET_PREFIX }}" ${{ matrix.target }}
+      - name: Fetch production manifest (state for deferral)
+        run: |
+          mkdir -p prod-state
+          aws s3 cp "s3://${{ vars.ARTIFACTS_BUCKET }}/prod/${{ matrix.target }}/manifest.json" prod-state/manifest.json || echo "No prod manifest yet: full build"
+      - name: Build modified models and their children
+        run: |
+          if [ -f prod-state/manifest.json ]; then
+            .venv/bin/dbt build --target ${{ matrix.target }} --select state:modified+ --defer --state prod-state
+          else
+            .venv/bin/dbt build --target ${{ matrix.target }}
+          fi
+      - name: Drop PR schemas
+        if: always()
+        run: >-
+          .venv/bin/dbt run-operation drop_ci_schemas
+          --args "{prefix: ci_pr_${{ github.event.number }}}"
+          --target ${{ matrix.target }}

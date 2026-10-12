@@ -1,0 +1,55 @@
+version: 2
+
+models:
+  - name: stg_shop__customers
+    description: Typed, standardized customers with hash keys. PII columns are classified for masking.
+    columns:
+      - name: customer_hk
+        data_tests: [not_null]
+      - name: customer_id
+        data_tests: [not_null]
+      - name: first_name
+        meta: {pii: true, pii_class: name}
+      - name: last_name
+        meta: {pii: true, pii_class: name}
+      - name: email
+        meta: {pii: true, pii_class: email}
+      - name: phone
+        meta: {pii: true, pii_class: phone}
+      - name: date_of_birth
+        meta: {pii: true, pii_class: date}
+      - name: address_line1
+        meta: {pii: true, pii_class: address}
+      - name: postal_code
+        meta: {pii: true, pii_class: postal_code}
+  - name: stg_shop__products
+    columns:
+      - name: product_hk
+        data_tests: [not_null]
+  - name: stg_shop__orders
+    columns:
+      - name: order_hk
+        data_tests: [not_null]
+      - name: customer_hk
+        data_tests: [not_null]
+  - name: stg_shop__order_lines
+    columns:
+      - name: order_line_hk
+        data_tests: [not_null]
+  - name: stg_shop__payments
+    columns:
+      - name: payment_hk
+        data_tests: [not_null]
+      - name: card_last4
+        meta: {pii: true, pii_class: card}
+
+unit_tests:
+  - name: stg_customers_standardizes_email_and_segment
+    model: stg_shop__customers
+    given:
+      - input: source('shop', 'customers')
+        rows:
+          - {customer_id: "C1", first_name: " Ann ", last_name: "Lee", email: " Ann.Lee@Example.COM ", customer_segment: "vip"}
+    expect:
+      rows:
+        - {customer_id: "C1", first_name: "Ann", email: "ann.lee@example.com", customer_segment: "VIP"}

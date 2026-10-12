@@ -1,0 +1,28 @@
+[sqlfluff]
+templater = dbt
+dialect = postgres
+max_line_length = 140
+large_file_skip_byte_limit = 0
+# Hash/key expressions are long and generated; layout rules add noise there.
+exclude_rules = LT05, ST06, AM04, RF04, ST05
+
+[sqlfluff:templater:dbt]
+project_dir = .
+profiles_dir = profiles
+target = postgres
+
+[sqlfluff:indentation]
+tab_space_size = 4
+indented_joins = false
+
+[sqlfluff:rules:capitalisation.keywords]
+capitalisation_policy = lower
+[sqlfluff:rules:capitalisation.functions]
+extended_capitalisation_policy = lower
+[sqlfluff:rules:capitalisation.literals]
+capitalisation_policy = lower
+# Oracle does not accept AS before table aliases.
+[sqlfluff:rules:aliasing.table]
+aliasing = implicit
+[sqlfluff:rules:aliasing.column]
+aliasing = explicit
