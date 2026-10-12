@@ -1,0 +1,13 @@
+.venv/
+target/
+dbt_packages/
+logs/
+.user.yml
+data/
+*.pyc
+__pycache__/
+.env
+.terraform/
+*.tfstate*
+*.tfplan
+.terraform.lock.hcl

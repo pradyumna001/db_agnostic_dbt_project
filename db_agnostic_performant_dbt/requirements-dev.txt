@@ -1,0 +1,12 @@
+# Data generation / loading
+faker>=30,<40
+psycopg2-binary>=2.9,<3
+pyodbc>=5.1,<6
+oracledb>=2.4,<4
+snowflake-connector-python>=3.12,<4
+databricks-sql-connector>=3.4,<5
+# Quality
+sqlfluff==3.2.5
+sqlfluff-templater-dbt==3.2.5
+pre-commit>=4,<5
+ruff>=0.6

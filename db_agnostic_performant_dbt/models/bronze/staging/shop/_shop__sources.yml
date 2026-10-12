@@ -1,0 +1,19 @@
+version: 2
+
+sources:
+  - name: shop
+    description: Operational e-commerce system (synthetic data from data_generator/).
+    database: "{{ env_var('DBT_RAW_DATABASE', target.database) }}"
+    schema: "{{ env_var('DBT_RAW_SCHEMA', 'raw') if target.type != 'oracle' else target.schema }}"
+    loaded_at_field: loaded_at
+    config:
+      freshness:
+        warn_after: {count: 24, period: hour}
+        error_after: {count: 48, period: hour}
+    tables:
+      - name: customers
+        description: Customer master data, contains PII.
+      - name: products
+      - name: orders
+      - name: order_lines
+      - name: payments

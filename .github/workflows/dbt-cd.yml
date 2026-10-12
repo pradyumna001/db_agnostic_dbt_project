@@ -1,0 +1,94 @@
+name: dbt CD
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "db_agnostic_performant_dbt/**"
+      - ".github/workflows/dbt-cd.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: dbt-cd
+  cancel-in-progress: false
+
+defaults:
+  run:
+    working-directory: db_agnostic_performant_dbt
+
+env:
+  DBT_PROFILES_DIR: profiles
+  DBT_ENV: prod
+  GIT_SHA: ${{ github.sha }}
+
+jobs:
+  deploy:
+    name: deploy (${{ matrix.target }})
+    if: vars.ENABLE_CLOUD_DEPLOY == 'true'
+    runs-on: ubuntu-latest
+    environment: prod # required reviewers gate production
+    strategy:
+      fail-fast: true
+      max-parallel: 1
+      matrix:
+        target: [snowflake, databricks]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v3
+      - run: uv venv && uv pip install -r requirements.txt
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+      - name: Load warehouse credentials from Secrets Manager
+        run: scripts/load_secrets.sh "${{ vars.SECRET_PREFIX }}" ${{ matrix.target }}
+      - name: Fetch previous production state
+        run: |
+          mkdir -p prod-state
+          aws s3 cp "s3://${{ vars.ARTIFACTS_BUCKET }}/prod/${{ matrix.target }}/manifest.json" prod-state/manifest.json || true
+      - name: Build changed models (full build on first deploy)
+        run: |
+          if [ -f prod-state/manifest.json ]; then
+            .venv/bin/dbt build --target ${{ matrix.target }} --select state:modified+ --state prod-state
+          else
+            .venv/bin/dbt build --target ${{ matrix.target }}
+          fi
+      - name: Publish state and docs
+        run: |
+          .venv/bin/dbt docs generate --target ${{ matrix.target }}
+          aws s3 cp target/manifest.json "s3://${{ vars.ARTIFACTS_BUCKET }}/prod/${{ matrix.target }}/manifest.json"
+          aws s3 cp target/run_results.json "s3://${{ vars.ARTIFACTS_BUCKET }}/prod/${{ matrix.target }}/runs/${GIT_SHA}.json"
+          aws s3 sync target/ "s3://${{ vars.ARTIFACTS_BUCKET }}/docs/${{ matrix.target }}/" --exclude "*" --include "index.html" --include "catalog.json" --include "manifest.json"
+
+  publish-airflow:
+    name: publish DAGs + dbt project to MWAA
+    needs: deploy
+    if: vars.ENABLE_CLOUD_DEPLOY == 'true'
+    runs-on: ubuntu-latest
+    environment: prod
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v3
+      - run: uv venv && uv pip install -r requirements.txt
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+      - name: Pre-build manifest so Cosmos renders DAGs without running dbt ls
+        env:
+          SNOWFLAKE_ACCOUNT: placeholder
+          SNOWFLAKE_USER: placeholder
+        run: .venv/bin/dbt parse --target snowflake
+      - name: Sync to the MWAA bucket
+        run: |
+          B="s3://${{ vars.AIRFLOW_BUCKET }}"
+          aws s3 sync orchestration/airflow/dags "$B/dags" --delete --exclude "dbt/*"
+          aws s3 sync . "$B/dags/dbt/db_agnostic_performant_dbt" --delete \
+            --exclude ".venv/*" --exclude "data/*" --exclude "logs/*" --exclude "infra/*" \
+            --exclude "orchestration/*" --exclude ".env" --exclude "target/*" --include "target/manifest.json"
+          aws s3 cp orchestration/airflow/mwaa/requirements.txt "$B/requirements.txt"
+          aws s3 cp orchestration/airflow/mwaa/startup.sh "$B/startup.sh"

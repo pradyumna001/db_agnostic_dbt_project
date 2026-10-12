@@ -1,0 +1,69 @@
+# All secrets come from environment variables (never commit credentials).
+# Select platform with DBT_TARGET; select environment (dev/ci/prod) with DBT_ENV.
+db_agnostic_performant_dbt:
+  target: "{{ env_var('DBT_TARGET', 'postgres') }}"
+  outputs:
+    postgres:
+      type: postgres
+      host: "{{ env_var('PG_HOST', 'localhost') }}"
+      port: "{{ env_var('PG_PORT', '5432') | int }}"
+      user: "{{ env_var('PG_USER', 'dbt') }}"
+      password: "{{ env_var('PG_PASSWORD', '') }}"
+      dbname: "{{ env_var('PG_DATABASE', 'analytics') }}"
+      schema: "{{ env_var('DBT_SCHEMA', 'dbt_dev') }}"
+      sslmode: "{{ env_var('PG_SSLMODE', 'prefer') }}"
+      threads: "{{ env_var('DBT_THREADS', '4') | int }}"
+
+    sqlserver:
+      type: sqlserver
+      driver: "ODBC Driver 18 for SQL Server"
+      server: "{{ env_var('MSSQL_HOST', 'localhost') }}"
+      port: "{{ env_var('MSSQL_PORT', '1433') | int }}"
+      database: "{{ env_var('MSSQL_DATABASE', 'analytics') }}"
+      schema: "{{ env_var('DBT_SCHEMA', 'dbt_dev') }}"
+      authentication: "{{ env_var('MSSQL_AUTH', 'sql') }}"
+      user: "{{ env_var('MSSQL_USER', '') }}"
+      password: "{{ env_var('MSSQL_PASSWORD', '') }}"
+      encrypt: true
+      trust_cert: "{{ env_var('MSSQL_TRUST_CERT', 'false') | lower in ['true', '1', 'yes'] }}"
+      threads: "{{ env_var('DBT_THREADS', '4') | int }}"
+
+    oracle:
+      type: oracle
+      user: "{{ env_var('ORACLE_USER', 'dbt') }}"
+      pass: "{{ env_var('ORACLE_PASSWORD', '') }}"
+      protocol: "{{ env_var('ORACLE_PROTOCOL', 'tcp') }}"
+      host: "{{ env_var('ORACLE_HOST', 'localhost') }}"
+      port: "{{ env_var('ORACLE_PORT', '1521') | int }}"
+      service: "{{ env_var('ORACLE_SERVICE', 'FREEPDB1') }}"
+      database: "{{ env_var('ORACLE_SERVICE', 'FREEPDB1') }}"
+      schema: "{{ env_var('ORACLE_USER', 'dbt') }}"
+      threads: "{{ env_var('DBT_THREADS', '4') | int }}"
+
+    snowflake:
+      type: snowflake
+      account: "{{ env_var('SNOWFLAKE_ACCOUNT', '') }}"
+      user: "{{ env_var('SNOWFLAKE_USER', '') }}"
+      authenticator: snowflake_jwt
+      # Either a key file (local/CI) or the PEM contents (Airflow / Secrets Manager).
+      private_key_path: "{{ env_var('SNOWFLAKE_PRIVATE_KEY_PATH', '') }}"
+      private_key: "{{ env_var('SNOWFLAKE_PRIVATE_KEY', '') }}"
+      private_key_passphrase: "{{ env_var('SNOWFLAKE_PRIVATE_KEY_PASSPHRASE', '') }}"
+      role: "{{ env_var('SNOWFLAKE_ROLE', 'TRANSFORMER') }}"
+      warehouse: "{{ env_var('SNOWFLAKE_WAREHOUSE', 'TRANSFORM_WH') }}"
+      database: "{{ env_var('SNOWFLAKE_DATABASE', 'ANALYTICS') }}"
+      schema: "{{ env_var('DBT_SCHEMA', 'dbt_dev') }}"
+      query_tag: "dbt_agnostic_{{ env_var('DBT_ENV', 'dev') }}"
+      reuse_connections: true
+      threads: "{{ env_var('DBT_THREADS', '8') | int }}"
+
+    databricks:
+      type: databricks
+      host: "{{ env_var('DATABRICKS_HOST', 'example.cloud.databricks.com') }}"
+      http_path: "{{ env_var('DATABRICKS_HTTP_PATH', '/sql/1.0/warehouses/unset') }}"
+      auth_type: oauth
+      client_id: "{{ env_var('DATABRICKS_CLIENT_ID', '') }}"
+      client_secret: "{{ env_var('DATABRICKS_CLIENT_SECRET', '') }}"
+      catalog: "{{ env_var('DATABRICKS_CATALOG', 'analytics') }}"
+      schema: "{{ env_var('DBT_SCHEMA', 'dbt_dev') }}"
+      threads: "{{ env_var('DBT_THREADS', '8') | int }}"

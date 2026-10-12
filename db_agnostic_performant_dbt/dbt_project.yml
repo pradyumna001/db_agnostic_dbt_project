@@ -1,0 +1,90 @@
+name: db_agnostic_performant_dbt
+version: "1.0.0"
+config-version: 2
+profile: db_agnostic_performant_dbt
+require-dbt-version: [">=1.10.0", "<2.0.0"]
+
+model-paths: ["models"]
+macro-paths: ["macros"]
+test-paths: ["tests"]
+seed-paths: ["seeds"]
+analysis-paths: ["analyses"]
+snapshot-paths: ["snapshots"]
+clean-targets: ["target", "dbt_packages"]
+
+flags:
+  send_anonymous_usage_stats: false
+
+vars:
+  # Environment: dev | ci | prod. Drives schema naming.
+  env: "{{ env_var('DBT_ENV', 'dev') }}"
+  # Oracle schemas are users; by default everything lands in the connecting user's schema.
+  oracle_single_schema: true
+  record_source_prefix: "SHOP"
+  # Hours re-scanned behind the watermark on incremental loads (late-arriving data).
+  watermark_lookback_hours: 0
+  dim_date_start: "2020-01-01"
+  dim_date_days: 4018
+  # Security
+  enable_grants: false
+  enable_native_masking: true
+  gold_reader_roles: []
+  pii_reader_role: "PII_READER"
+  snowflake_pii_tag: "GOVERNANCE.PII_CLASS"   # created by infra/terraform/modules/snowflake_platform
+  databricks_mask_schema: "governance"
+  # Performance
+  databricks_optimize: false
+
+on-run-start:
+  - "{{ create_ops_objects() }}"
+  - "{{ create_mask_functions() }}"
+on-run-end:
+  - "{{ log_run_results(results) }}"
+
+models:
+  db_agnostic_performant_dbt:
+    +post-hook:
+      - "{{ apply_performance() }}"
+      - "{{ apply_masking() }}"
+
+    bronze:
+      +schema: bronze
+      +materialized: view
+      +access: protected
+      +tags: ["bronze"]
+
+    silver:
+      +schema: silver
+      +access: protected
+      +tags: ["silver"]
+      raw_vault:
+        +materialized: incremental
+        +incremental_strategy: append
+        +on_schema_change: fail
+        +tags: ["raw_vault"]
+        +transient: false            # snowflake: system of record keeps time travel + fail-safe
+        +file_format: delta          # databricks
+        +tblproperties:              # databricks
+          delta.autoOptimize.optimizeWrite: "true"
+          delta.autoOptimize.autoCompact: "true"
+      business_vault:
+        +materialized: table
+        +tags: ["business_vault"]
+        +file_format: delta
+
+    gold:
+      +schema: gold
+      +materialized: table
+      +access: public
+      +tags: ["gold"]
+      +transient: true               # snowflake: gold is rebuildable from the vault
+      +file_format: delta
+      +parallel: 4                   # oracle
+      +table_compression_clause: "COMPRESS"   # oracle basic compression
+      secure:
+        +materialized: view
+        +tags: ["gold", "secure"]
+
+tests:
+  db_agnostic_performant_dbt:
+    +severity: error

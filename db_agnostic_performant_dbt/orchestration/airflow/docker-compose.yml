@@ -1,0 +1,23 @@
+# Local Airflow (standalone) for developing the DAGs against the local Docker databases.
+services:
+  airflow:
+    image: apache/airflow:2.10.3-python3.11
+    command: standalone
+    ports: ["8080:8080"]
+    environment:
+      _PIP_ADDITIONAL_REQUIREMENTS: "astronomer-cosmos==1.7.1"
+      AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+      AIRFLOW_VAR_DBT_TARGETS: "postgres"
+      AIRFLOW_VAR_DBT_ENV: "dev"
+      AIRFLOW_VAR_DBT_SCHEMA: "dbt_airflow"
+      AIRFLOW_VAR_PG_HOST: "host.docker.internal"
+      AIRFLOW_VAR_PG_PORT: "5432"
+      AIRFLOW_VAR_PG_USER: "dbt"
+      AIRFLOW_VAR_PG_PASSWORD: "dbt_local_pw"
+      AIRFLOW_VAR_PG_DATABASE: "analytics"
+      DBT_PROJECT_DIR: /opt/airflow/dbt
+      DBT_EXECUTABLE: /opt/airflow/dbt_venv/bin/dbt
+    extra_hosts: ["host.docker.internal:host-gateway"]
+    volumes:
+      - ./dags:/opt/airflow/dags
+      - ../..:/opt/airflow/dbt:ro
